@@ -1,0 +1,19 @@
+[package]
+name = "home_temp_reader"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.release]
+opt-level = 'z' # Optimize for size
+lto = true
+codegen-units = 1
+
+[dependencies]
+bluer = { version = "0.15.4",  features = ["bluetoothd"]}
+futures = "0.3"
+tokio = { version = "1", features = ["net", "io-util"] }
+tokio-stream = { version = "0.1", optional = true }
+env_logger = "0.10"
+phf = { version = "^0.11.1", features = ["macros", "unicase"] } #, default-features = false }
+chrono = "*"
