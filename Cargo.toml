@@ -17,3 +17,5 @@ tokio-stream = { version = "0.1", optional = true }
 env_logger = "0.10"
 phf = { version = "^0.11.1", features = ["macros", "unicase"] } #, default-features = false }
 chrono = "*"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "*"

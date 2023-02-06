@@ -1,57 +1,155 @@
 //! Discover Bluetooth devices and list them.
 
-use bluer::{Adapter, AdapterEvent, Address, DeviceEvent};
+use bluer::{Adapter, AdapterEvent, Address, DeviceEvent, Uuid};
 use futures::{pin_mut, stream::SelectAll, StreamExt};
-use std::{collections::HashSet, env};
+use std::{collections::{HashSet, HashMap}, env};
 
-use phf::phf_map;
 use chrono::{DateTime, Utc}; // 0.4.15
 use std::time::SystemTime;
 
+use std::fmt;
 
+use serde::Deserialize;
+use serde_json;
+use std::fs::File;
+use std::io::Read;
 
-// #[derive(Clone)]
-// pub enum Keyword {
-//     Loop,
-//     Continue,
-//     Break,
-//     Fn,
-//     Extern,
-// }
-
-// static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
-//     "loop" => Keyword::Loop,
-//     "continue" => Keyword::Continue,
-//     "break" => Keyword::Break,
-//     "fn" => Keyword::Fn,
-//     "extern" => Keyword::Extern,
-// };
-
-static MAP: phf::Map<&'static str, &'static str> = phf_map! {
-    "ATC_5791C5" => "dining_room",
-    "ATC_BB91AD" => "chanel_bedroom",
-    "ATC_B0D3D5" => "basement",
-    "ATC_40FA49" => "emmanuel_bedroom",
-    "ATC_D3CFDF" => "jhonuel_bedroom",
-    "ATC_E2D32F" => "guest_bedroom",
-    "ATC_D666B3" => "main_bedroom",
-    "ATC_7AB84F" => "kitchen",
-    "ATC_DC35FA" => "fireplace_room",
-    "ATC_309577" => "garage",
-    "ATC_24BC21" => "outside",
-
-};
-
-fn get_device_map(device_id: &str) -> Option<&str> {
-    return MAP.get(device_id).cloned()
+#[derive(Deserialize, Debug, Clone)]
+struct Sensor {
+    name: String,
+    location: String
 }
 
-async fn query_device(adapter: &Adapter, addr: Address) -> bluer::Result<()> {
-    let device = adapter.device(addr)?;
+struct Temperature {
+    celsius: f32
+}
 
+
+impl Temperature {
+    fn to_fahrenheit(&self) -> f32 {
+        // Only two digits transformation, not rounding, but truncating
+        ((self.celsius * 1.8 + 32.0) * 100f32).floor() / 100.0
+    }
+}
+
+impl fmt::Display for Temperature {
+    // This trait requires `fmt` with this exact signature.
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        
+        write!(f, "{:.2}", self.celsius)
+    }
+}
+
+struct SensorReading {
+    sensor: Sensor,
+    date_time: DateTime<Utc>,
+    temperature: Temperature,
+    humidity: u8,
+    batery_level: u8,
+
+}
+
+impl fmt::Display for SensorReading {
+    // This trait requires `fmt` with this exact signature.
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        
+        write!(f, "{},{},{},{},{},{},{}", self.date_time, self.sensor.name, self.sensor.location, self.temperature, self.temperature.to_fahrenheit(), self.humidity, self.batery_level)
+    }
+}
+
+#[derive(Deserialize, Debug)]
+struct Config {
+    sensors: Vec<Sensor>
+}
+
+fn read_config(path: &str) -> Config {
+    
+    let mut file = File::open(path).unwrap();
+    let mut data = String::new();
+    file.read_to_string(&mut data).unwrap();
+
+    
+    let config: Config = serde_json::from_str(&data).unwrap();
+    config
+}
+
+fn get_sensors(config: &Config) -> HashMap<String, Sensor> {
+    let mut sensors: HashMap<String, Sensor> = HashMap::new();
+
+    let sen = config.sensors.clone();
+
+    sen.into_iter().for_each(|s: Sensor| {
+       
+        sensors.insert(s.name.clone(), Sensor {
+            name:s.name.clone(), location:s.location.clone()
+        });
+    }); 
+
+    sensors
+
+}
+
+
+
+fn read_data(sensor: Sensor, it: HashMap<Uuid, Vec<u8>>) -> Option<SensorReading> {
+
+    match it.len() {
+        1 => {
+            let mut reading: Option<SensorReading> = None;
+            for (_, value) in it {
+
+                let celsius: f32 = (((value[6] as i16) << 8) | value[7] as i16) as f32 /10.0;
+                let hum_pct = value[8];
+                let batt = value[9];
+                
+                let now = SystemTime::now();
+                let now: DateTime<Utc> = now.into();
+        
+                reading = Some(SensorReading {
+                    sensor,
+                    date_time: now,
+                    temperature: Temperature{celsius},
+                    humidity: hum_pct,
+                    batery_level: batt,
+                });
+        
+                break;
+        
+            }
+            reading
+        }
+        _ => {
+            None
+        }
+    }
+
+    
+
+    
+
+    
+
+}
+
+
+fn get_sensor(sensors_map: &HashMap<String, Sensor>, device_id: &str) -> Sensor {
+    match sensors_map.get(device_id) {
+        Some(sensor) => {
+            sensor.clone()
+        }
+        None => {
+            Sensor{name: device_id.to_string(), location: "unknown".to_string()}
+        }
+    }
+    
+}
+
+async fn read_atc_device(sensors_map:  &HashMap<String, Sensor>, adapter: &Adapter, addr: Address) -> bluer::Result<()> {
+    let device = adapter.device(addr)?;
     let device_name = device.name().await?;
     let assigned_name = match device_name {
         Some(x) => {
+            // println!("{x}");
             if !x.contains("ATC_") {
                 return Ok(())        
             }
@@ -63,39 +161,23 @@ async fn query_device(adapter: &Adapter, addr: Address) -> bluer::Result<()> {
         }
     };
 
-         
-    
-    let mapped_name: &str = match get_device_map(&assigned_name) {
-                    Some(name) => name,
-                    None => "unknown"
-                };
-    
-    
+    let sensor = get_sensor(sensors_map, &assigned_name);
+
     if let Some(it) = device.service_data().await? {
-        for (uuid, value) in it {
-
-            //println!("\nUUID: {} / LEN: {}\n", key, value.len());
-            let temp_cel = ((value[6] as u16) << 8) | value[7] as u16;
-            let temperature_far = temp_cel as f32 * 0.18 + 32.0;
-            let hum_pct = value[8];
-            let batt = value[9];
+        match read_data(sensor, it) {
+            Some(reading) => {
+                println!("{}", reading);
+            }
+            _  => ()
             
-            let now = SystemTime::now();
-            let now: DateTime<Utc> = now.into();
-            let now = now.to_rfc3339();
-            /*
-            println!("datetime: {}", now); 
-            println!("UUID: {}", uuid); 
-            println!("TEMP C: {}", temp_cel);
-            println!("TEMP F: {}", temperature_far);
-            println!("HUM%: {}", hum_pct);
-            println!("Batt: {}", batt);
-            */
-
-            println!("{},{},{},{},{},{},{},{}", now, uuid, assigned_name, mapped_name, temp_cel, temperature_far, hum_pct, batt);
         }
-    
-    };
+        
+
+
+    }
+    Ok(())
+
+}
 
     // println!("#####################");
 
@@ -113,8 +195,6 @@ async fn query_device(adapter: &Adapter, addr: Address) -> bluer::Result<()> {
     // println!("    Manufacturer data:  {:?}", device.manufacturer_data().await?);
     // println!("    Service data:       {:?}", device.service_data().await?);
     
-    Ok(())
-}
 /*
 async fn query_all_device_properties(adapter: &Adapter, addr: Address) -> bluer::Result<()> {
     let device = adapter.device(addr)?;
@@ -131,6 +211,10 @@ async fn main() -> bluer::Result<()> {
     let with_changes = false; //env::args().any(|arg| arg == "--changes");
     //let all_properties = env::args().any(|arg| arg == "--all-properties");
     let filter_addr: HashSet<_> = env::args().filter_map(|arg| arg.parse::<Address>().ok()).collect();
+
+    let config = read_config("./config.json");
+
+    let sensors_map = get_sensors(&config);
 
     env_logger::init();
     let session = bluer::Session::new().await?;
@@ -152,16 +236,8 @@ async fn main() -> bluer::Result<()> {
                             continue;
                         }
 
-                        // println!("Device added: {}", addr);
-                        // let res = if all_properties {
-                        //     query_all_device_properties(&adapter, addr).await
-                        // } else {
-                        //     query_device(&adapter, addr).await
-                        // };
 
-                        let res = query_device(&adapter, addr).await;
-                        
-
+                        let res = read_atc_device(&sensors_map, &adapter, addr).await;
 
                         if let Err(err) = res {
                             println!("    Error: {}", &err);
@@ -176,6 +252,10 @@ async fn main() -> bluer::Result<()> {
                     /* 
                     AdapterEvent::DeviceRemoved(addr) => {
                         println!("Device removed: {}", addr);
+                    }
+
+                    AdapterEvent::PropertyChanged(property) => {
+                        println!(" Property changed-->   {:?}", property);
                     }
                     */
                     _ => (),
