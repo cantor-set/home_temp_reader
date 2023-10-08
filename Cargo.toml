@@ -10,7 +10,7 @@ lto = true
 codegen-units = 1
 
 [dependencies]
-bluer = { version = "0.15.4",  features = ["bluetoothd"]}
+bluer = { version = "0.16.1",  features = ["bluetoothd"]}
 futures = "0.3"
 tokio = { version = "1", features = ["net", "io-util"] }
 tokio-stream = { version = "0.1", optional = true }
@@ -19,3 +19,4 @@ phf = { version = "^0.11.1", features = ["macros", "unicase"] } #, default-featu
 chrono = "*"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "*"
+log = "0.4"
