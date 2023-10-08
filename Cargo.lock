@@ -393,6 +393,7 @@ dependencies = [
  "chrono",
  "env_logger",
  "futures",
+ "humantime",
  "log",
  "phf",
  "serde",

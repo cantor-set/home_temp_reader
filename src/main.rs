@@ -1,8 +1,11 @@
 //! Discover Bluetooth devices and list them.
-use std::thread::sleep;
+//use std::thread::sleep;
+//use humantime;
 use std::time;
+use std::time::Duration;
+use std::time::Instant;
 //use bluer::{Adapter, AdapterEvent, Address, Uuid, Device};
-use bluer::{AdapterEvent, Uuid,};
+use bluer::{AdapterEvent, Uuid};
 use futures::pin_mut;
 use futures::StreamExt;
 // use std::{
@@ -29,6 +32,34 @@ use tokio::task;
 struct Sensor {
     name: String,
     location: String,
+}
+#[derive(Clone, Debug)]
+struct SensorTracker {
+    tracker: HashMap<String, Instant>,
+}
+
+impl SensorTracker {
+    /// .
+    fn new() -> SensorTracker {
+        Self {
+            tracker: HashMap::new(),
+        }
+    }
+
+    fn get(&mut self, sensor: &Sensor) -> Instant {
+        match self.tracker.get(&sensor.name) {
+            Some(update_time) => *update_time,
+            None => {
+                //self.update(sensor);
+                Instant::now() - Duration::new(61, 0)
+            }
+        }
+    }
+
+    fn update(&mut self, sensor: &Sensor) {
+        let e = self.tracker.entry(sensor.name.clone());
+        *e.or_insert(Instant::now()) = Instant::now();
+    }
 }
 
 struct Temperature {
@@ -126,7 +157,6 @@ fn read_data(sensor: Sensor, it: HashMap<Uuid, Vec<u8>>) -> Option<SensorReading
                     batery_level: batt,
                 });
                 break;
-                
             }
             reading
         }
@@ -144,14 +174,13 @@ fn get_sensor(sensors_map: &HashMap<String, Sensor>, device_id: &str) -> Sensor 
     }
 }
 
-
-
-async fn main2() -> bluer::Result<()> {
+async fn bt_monitor() -> bluer::Result<()> {
     let config = read_config("./config.json");
     let sensors_map = get_sensors(&config);
     //env_logger::init();
     let session = bluer::Session::new().await?;
     let adapter = session.default_adapter().await?;
+    //let adapter = session.adapter("hci1")?;
     let mm = adapter.monitor().await?;
     adapter.set_powered(true).await?;
     //let sampling_time = Duration::new(0,1000);
@@ -167,63 +196,52 @@ async fn main2() -> bluer::Result<()> {
             patterns: Some(vec![Pattern {
                 data_type: 0x09, // name
                 start_position: 0x00,
-                content: vec![0x41, 0x54, 0x43],}]), // ATC
+                content: vec![0x41, 0x54, 0x43],
+            }]), // ATC
             ..Default::default()
         })
         .await?;
 
-    let mut now = time::Instant::now();    
-    let one_minute = time::Duration::new(60,0);
-
-    
+    //let mut now = time::Instant::now();
+    let one_minute = time::Duration::new(60, 0);
+    let mut tracker = SensorTracker::new();
 
     while let Some(mevt) = &monitor_handle.next().await {
-
-        if now.elapsed() > one_minute {
-            println!("Should sleep: {:?}", now);
-            now = time::Instant::now();
-            //sleep(one_minute);
-        }
-
-        //println!("Here -> {:?}", mevt);
-
-        match  mevt {
+        match mevt {
             MonitorEvent::DeviceFound(d) => {
                 match adapter.device(d.device) {
-                    Ok(device) => {
-                        
-                        //let mut device_name = "";
-
-                        //println!("Got Service DAta!!! -> {:?}", x.service_data().await?);
-
-                        
+                    Ok(device) => 'device_checker: {
                         let device_name = match device.name().await? {
-                            Some(d_name) => {
-                                d_name.clone()
-                            }
-                            None => "Unknown".to_string()
-                                                
+                            Some(d_name) => d_name.clone(),
+                            None => "Unknown".to_string(),
                         };
 
-
                         let sensor = get_sensor(&sensors_map, &device_name);
+                        let last_checked = tracker.get(&sensor);
+
+                        if last_checked.elapsed() < one_minute {
+                            break 'device_checker;
+                        }
+
+                        tracker.update(&sensor);
+
+                        //println!("{:?}", tracker);
+
                         if let Some(it) = device.service_data().await? {
                             match read_data(sensor, it) {
                                 Some(reading) => {
                                     println!("{}", reading);
                                 }
-                                _ => {println!("Could not read sensor data")},
+                                _ => {
+                                    println!("Could not read sensor data")
+                                }
                             }
                         }
-
-                        
-                    },
+                    }
                     Err(y) => {
                         println!("Got Error -> {:?}", y);
-                        
                     }
                 }
-                
             }
             _ => (),
         }
@@ -231,8 +249,6 @@ async fn main2() -> bluer::Result<()> {
 
     Ok(())
 }
-
-
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> bluer::Result<()> {
@@ -242,15 +258,14 @@ async fn main() -> bluer::Result<()> {
     // println!("Discovering devices using Bluetooth adapter {}\n", adapter.name());
 
     task::spawn(async {
-        
-        println!("now running on a worker thread");
-        match main2().await {
+        //println!("now running on a worker thread");
+        match bt_monitor().await {
             Ok(c) => {
                 println!("Yes {:?}", c);
-            },
-            Err(_) => { println!("FAILED");}
-        
-
+            }
+            Err(_) => {
+                println!("FAILED");
+            }
         }
     });
 
@@ -259,7 +274,6 @@ async fn main() -> bluer::Result<()> {
     let device_events = adapter.discover_devices().await?;
 
     pin_mut!(device_events);
-
 
     loop {
         tokio::select! {
