@@ -12,9 +12,9 @@ use futures::StreamExt;
 //     collections::{HashMap, HashSet},
 //     env,
 // };
-use std::collections::HashMap;
-
 use chrono::{DateTime, Utc}; // 0.4.15
+use std::collections::HashMap;
+use std::path::Path;
 use std::time::SystemTime;
 
 use std::fmt;
@@ -26,7 +26,16 @@ use std::io::Read;
 //use std::sync::atomic::{AtomicUsize, Ordering};
 //use std::sync::Arc;
 use bluer::monitor::{Monitor, MonitorEvent, Pattern, RssiSamplingPeriod};
+use clap::Parser;
 use tokio::task;
+
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+struct Args {
+    /// configuration path, expects a JSON
+    #[arg(short, long)]
+    config_path: String,
+}
 
 #[derive(Deserialize, Debug, Clone)]
 struct Sensor {
@@ -174,8 +183,9 @@ fn get_sensor(sensors_map: &HashMap<String, Sensor>, device_id: &str) -> Sensor 
     }
 }
 
-async fn bt_monitor() -> bluer::Result<()> {
-    let config = read_config("./config.json");
+async fn bt_monitor(config_file_path: &String) -> bluer::Result<()> {
+    //let config = read_config("./config.json");
+    let config = read_config(&config_file_path);
     let sensors_map = get_sensors(&config);
     //env_logger::init();
     let session = bluer::Session::new().await?;
@@ -253,13 +263,21 @@ async fn bt_monitor() -> bluer::Result<()> {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> bluer::Result<()> {
     env_logger::init();
+
+    let args = Args::parse();
+
+    if !Path::new(&args.config_path).exists() {
+        println!("Configuration file does not exists");
+        std::process::exit(1);
+    }
+
     let session = bluer::Session::new().await?;
     let adapter = session.default_adapter().await?;
     // println!("Discovering devices using Bluetooth adapter {}\n", adapter.name());
 
-    task::spawn(async {
+    task::spawn(async move {
         //println!("now running on a worker thread");
-        match bt_monitor().await {
+        match bt_monitor(&args.config_path).await {
             Ok(c) => {
                 println!("Yes {:?}", c);
             }
@@ -279,7 +297,18 @@ async fn main() -> bluer::Result<()> {
         tokio::select! {
             Some(device_event) = device_events.next() => {
                 match device_event {
-                    AdapterEvent::DeviceAdded(_) => {
+                    AdapterEvent::PropertyChanged(property) => {
+
+                        match property {
+
+                            bluer::AdapterProperty::Powered(p) => {
+                                if !p {
+                                    std::process::exit(1);
+                                }
+                            }
+
+                            _ => (),
+                        }
                     }
                     _ => (),
                 }
