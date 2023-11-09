@@ -282,7 +282,7 @@ async fn main() -> bluer::Result<()> {
                 println!("Yes {:?}", c);
             }
             Err(_) => {
-                println!("FAILED");
+                std::process::exit(1);
             }
         }
     });
