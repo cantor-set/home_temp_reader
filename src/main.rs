@@ -1,38 +1,27 @@
 //! Discover Bluetooth devices and list them.
-//use std::thread::sleep;
-//use humantime;
+use bluer::{Adapter, AdapterEvent, Uuid};
+use chrono::{DateTime, Utc}; // 0.4.15
+use futures::pin_mut;
+use futures::StreamExt;
+use std::collections::HashMap;
+use std::path::Path;
 use std::time;
 use std::time::Duration;
 use std::time::Instant;
-//use bluer::{Adapter, AdapterEvent, Address, Uuid, Device};
-use bluer::{Adapter, AdapterEvent, Uuid};
-use futures::pin_mut;
-use futures::StreamExt;
-// use std::{
-//     collections::{HashMap, HashSet},
-//     env,
-// };
-use chrono::{DateTime, Utc}; // 0.4.15
-use std::collections::HashMap;
-use std::path::Path;
 use std::time::SystemTime;
 
 use std::fmt;
 
+use bluer::monitor::{Monitor, MonitorEvent, Pattern, RssiSamplingPeriod};
+use clap::Parser;
 use serde::Deserialize;
 use serde_json;
 use std::fs::File;
 use std::io::Read;
-//use std::sync::atomic::{AtomicUsize, Ordering};
-//use std::sync::Arc;
-use bluer::monitor::{Monitor, MonitorEvent, Pattern, RssiSamplingPeriod};
-use clap::Parser;
 use tokio::task;
 
-/// Simple program to greet a person
 #[derive(Parser, Debug)]
 struct Args {
-    /// configuration path, expects a JSON
     #[arg(short, long)]
     config_path: String,
     #[arg(short, long, default_value = "")]
