@@ -5,7 +5,7 @@ use std::time;
 use std::time::Duration;
 use std::time::Instant;
 //use bluer::{Adapter, AdapterEvent, Address, Uuid, Device};
-use bluer::{AdapterEvent, Uuid};
+use bluer::{Adapter, AdapterEvent, Uuid};
 use futures::pin_mut;
 use futures::StreamExt;
 // use std::{
@@ -35,6 +35,8 @@ struct Args {
     /// configuration path, expects a JSON
     #[arg(short, long)]
     config_path: String,
+    #[arg(short, long, default_value = "")]
+    device: String,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -183,13 +185,21 @@ fn get_sensor(sensors_map: &HashMap<String, Sensor>, device_id: &str) -> Sensor 
     }
 }
 
-async fn bt_monitor(config_file_path: &String) -> bluer::Result<()> {
+async fn bt_monitor(config_file_path: &String, adapter_alias: &str) -> bluer::Result<()> {
     //let config = read_config("./config.json");
     let config = read_config(&config_file_path);
     let sensors_map = get_sensors(&config);
     //env_logger::init();
     let session = bluer::Session::new().await?;
-    let adapter = session.default_adapter().await?;
+    let adapter: Adapter;
+
+    if adapter_alias != "" {
+        adapter = session.adapter(adapter_alias)?;
+    } else {
+        adapter = session.default_adapter().await?;
+    }
+
+    //let adapter = session.default_adapter().await?;
     //let adapter = session.adapter("hci1")?;
     let mm = adapter.monitor().await?;
     adapter.set_powered(true).await?;
@@ -206,7 +216,7 @@ async fn bt_monitor(config_file_path: &String) -> bluer::Result<()> {
             patterns: Some(vec![Pattern {
                 data_type: 0x09, // name
                 start_position: 0x00,
-                content: vec![0x41, 0x54, 0x43],
+                content: vec![0x41, 0x54, 0x43], // Filters on ATC
             }]), // ATC
             ..Default::default()
         })
@@ -272,14 +282,33 @@ async fn main() -> bluer::Result<()> {
     }
 
     let session = bluer::Session::new().await?;
-    let adapter = session.default_adapter().await?;
+
+    let adapter_names = session.adapter_names().await?;
+    let mut adapter_alias: String = String::from("");
+
+    for adapter_name in adapter_names {
+        if adapter_name == args.device {
+            //args.device.clone_into(&mut adapter_alias);
+            adapter_alias = adapter_name;
+            break;
+        }
+    }
+
+    let adapter: Adapter;
+
+    if adapter_alias != "" {
+        adapter = session.adapter(&adapter_alias)?;
+    } else {
+        adapter = session.default_adapter().await?;
+    }
+
     // println!("Discovering devices using Bluetooth adapter {}\n", adapter.name());
 
     task::spawn(async move {
         //println!("now running on a worker thread");
-        match bt_monitor(&args.config_path).await {
+        match bt_monitor(&args.config_path, &adapter_alias).await {
             Ok(c) => {
-                println!("Yes {:?}", c);
+                println!("Application succesfully terminated {:?}", c);
             }
             Err(_) => {
                 std::process::exit(1);
