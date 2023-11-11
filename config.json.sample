@@ -1,0 +1,9 @@
+{
+    "sensors": [
+        {
+            "name": "ATC_XXXXX",
+            "location": "some_friendly_name"
+        },
+
+    ]
+}
