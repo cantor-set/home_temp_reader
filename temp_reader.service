@@ -11,7 +11,7 @@ Type=simple
 Restart=always
 RestartSec=90
 User=jnonon
-ExecStart=/home/jnonon/apps/home_temp_reader/start.sh
+ExecStart=/path/to/home_temp_reader/start.sh
 
 
 [Install]
