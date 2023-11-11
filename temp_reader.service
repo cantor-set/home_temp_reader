@@ -10,7 +10,7 @@ PartOf=bluetooth.target
 Type=simple
 Restart=always
 RestartSec=90
-User=jnonon
+User=cantor-set
 ExecStart=/path/to/home_temp_reader/start.sh
 
 
